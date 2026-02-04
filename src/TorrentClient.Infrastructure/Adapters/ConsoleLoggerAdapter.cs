@@ -32,5 +32,12 @@ namespace TorrentClient.Infrastructure.Adapters
             }
             Console.ResetColor();
         }
+
+        public void LogDebug(string message)
+        {
+            Console.ForegroundColor = ConsoleColor.DarkGray; 
+            Console.WriteLine($"[DEBUG] {DateTime.Now:HH:mm:ss} - {message}");
+            Console.ResetColor();
+        }
     }
 }
