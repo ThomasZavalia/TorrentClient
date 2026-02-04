@@ -11,10 +11,6 @@
     <ProjectReference Include="..\TorrentClient.Domain\TorrentClient.Domain.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <Folder Include="Adapters\Bencode\" />
-  </ItemGroup>
-
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
