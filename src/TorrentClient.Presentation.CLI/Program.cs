@@ -1,13 +1,16 @@
 ﻿using TorrentClient.Application.Common.Interfaces;
 using TorrentClient.Application.Ports;
+using TorrentClient.Application.UseCases;
 using TorrentClient.Infrastructure.Adapters;
 
 
 ILogger logger = new ConsoleLoggerAdapter();
 ITorrentParser parser = new TorrentParserAdapter();
+IPeerDiscovery peerDiscovery = new HttpTrackerAdapter(logger);
 
+var discoverPeersUseCase = new DiscoverPeersUseCase(peerDiscovery, logger);
 
-string torrentPath = args.Length > 0 ? args[0] : "test.torrent";
+string torrentPath = args.Length > 0 ? args[0] : "debian.torrent";
 
 try
 {
@@ -21,44 +24,30 @@ try
     logger.LogInfo($"Parsing: {torrentPath}...");
     var torrent = parser.Parse(torrentPath);
 
+    Console.WriteLine($"\n[Torrent Loaded] {torrent.Name} ({torrent.Length / 1024 / 1024} MB)");
+    Console.WriteLine($"Tracker: {torrent.AnnounceUrl}\n");
+
+   
+    logger.LogInfo("Contacting Tracker...");
+    var peers = await discoverPeersUseCase.ExecuteAsync(torrent);
+
+  
+    Console.WriteLine("DISCOVERED PEERS         ");
    
 
-    Console.WriteLine("TORRENT INFORMATION                       ");
-    Console.WriteLine($" Name:        {Truncate(torrent.Name, 45),-45} ");
-    Console.WriteLine($" Size:        {FormatBytes(torrent.Length),-45} ");
-    Console.WriteLine($" Tracker:     {Truncate(torrent.AnnounceUrl, 45),-45} ");
-    Console.WriteLine($" InfoHash:    {torrent.InfoHash.ToHex(),-45} ");
-    Console.WriteLine($" Pieces:      {torrent.PieceCount} x {FormatBytes(torrent.PieceLength),-40}");
+    int count = 0;
+    foreach (var peer in peers.Take(25)) 
+    {
+        Console.WriteLine($" {++count,2}. {peer.ToString(),-35} ");
+    }
+
+    if (peers.Count() > 25)
+        Console.WriteLine($" ... and {peers.Count() - 25} more            ");
+
     
-}
-catch (FileNotFoundException ex)
-{
-    logger.LogError($"File not found: {ex.Message}");
-}
-catch (InvalidDataException ex)
-{
-    logger.LogError($"Invalid torrent file: {ex.Message}");
+
 }
 catch (Exception ex)
 {
-    logger.LogError("Unexpected error", ex);
-}
-
-
-static string FormatBytes(long bytes)
-{
-    string[] sizes = { "B", "KB", "MB", "GB", "TB" };
-    int order = 0;
-    double size = bytes;
-    while (size >= 1024 && order < sizes.Length - 1)
-    {
-        order++;
-        size /= 1024;
-    }
-    return $"{size:0.##} {sizes[order]}";
-}
-
-static string Truncate(string value, int maxChars)
-{
-    return value.Length <= maxChars ? value : value.Substring(0, maxChars - 3) + "...";
+    logger.LogError("Critical Failure", ex);
 }
