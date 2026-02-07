@@ -9,7 +9,7 @@ namespace TorrentClient.Domain.ValueObjects
         private const string ClientPrefix = "-TC1000-";
         public byte[] Value { get; }
 
-        private PeerId(byte[] value)
+        internal PeerId(byte[] value)
         {
             Value = value;
         }
@@ -25,6 +25,18 @@ namespace TorrentClient.Domain.ValueObjects
 
             return new PeerId(bytes);
         }
+
+        public static PeerId FromBytes(byte[] bytes)
+        {
+            if (bytes == null)
+                throw new ArgumentNullException(nameof(bytes));
+
+            if (bytes.Length != 20)
+                throw new ArgumentException("PeerId must be exactly 20 bytes", nameof(bytes));
+
+            return new PeerId((byte[])bytes.Clone());
+        }
+
 
         public byte[] ToBytes() => (byte[])Value.Clone();
 
