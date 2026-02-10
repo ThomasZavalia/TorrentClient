@@ -12,7 +12,9 @@ namespace TorrentClient.Application.Ports
         Task<Handshake> ReceiveHandshakeAsync(CancellationToken cancellationToken);
         bool IsConnected { get; }
 
-       Task SendBytesAsync(byte[] data, CancellationToken cancellationToken);
-       Task<byte[]> ReceiveBytesAsync(int length, CancellationToken cancellationToken);
+        Task SendMessageAsync(PeerMessage message, CancellationToken ct);
+        Task<PeerMessage> ReceiveMessageAsync(CancellationToken ct);
+
+        Task SendRequestAsync(int index, int begin, int length, CancellationToken ct);
     }
 }

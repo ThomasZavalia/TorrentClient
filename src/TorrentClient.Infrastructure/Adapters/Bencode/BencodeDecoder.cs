@@ -58,7 +58,7 @@ namespace TorrentClient.Infrastructure.Adapters.Bencode
             if (_position >= _data.Length) throw new FormatException("Unterminated string length");
 
             string lengthStr = Encoding.ASCII.GetString(_data, start, _position - start);
-            _position++; // Skip ':'
+            _position++; 
 
             if (!int.TryParse(lengthStr, out int length))
                 throw new FormatException($"Invalid string length: {lengthStr}");
