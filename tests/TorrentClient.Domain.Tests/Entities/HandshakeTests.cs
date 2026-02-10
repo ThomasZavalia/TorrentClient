@@ -34,7 +34,7 @@ namespace TorrentClient.Domain.Tests.Entities
             var bytes = handshake.ToBytes();
 
             
-            Assert.Equal(19, bytes[0]); // Protocol length
+            Assert.Equal(19, bytes[0]); 
         }
 
         [Fact]

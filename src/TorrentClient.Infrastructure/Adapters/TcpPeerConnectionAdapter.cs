@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Net.Sockets;
 using System.Text;
@@ -98,37 +99,111 @@ namespace TorrentClient.Infrastructure.Adapters
             _tcpClient.Dispose();
         }
 
-        public async Task SendBytesAsync(byte[] data, CancellationToken ct)
+        public async Task SendMessageAsync(PeerMessage message, CancellationToken ct)
         {
             if (_stream == null)
                 throw new InvalidOperationException("Not connected");
 
-            await _stream.WriteAsync(data, ct);
-            await _stream.FlushAsync(ct);
-        }
+            int messageLength = 1 + message.Payload.Length;
 
-        public async Task<byte[]> ReceiveBytesAsync(int length, CancellationToken ct)
-        {
-            if (_stream == null)
-                throw new InvalidOperationException("Not connected");
+            var buffer = new byte[4 + messageLength];
 
-            var buffer = new byte[length];
-            int totalBytesRead = 0;
+            BinaryPrimitives.WriteInt32BigEndian(buffer.AsSpan(0, 4), messageLength);
 
-            while (totalBytesRead < length)
+            buffer[4] = (byte)message.MessageId;
+
+            if (message.Payload.Length > 0)
             {
-                int bytesRead = await _stream.ReadAsync(
-                    buffer.AsMemory(totalBytesRead, length - totalBytesRead),
-                    ct
-                );
-
-                if (bytesRead == 0)
-                    throw new InvalidOperationException("Connection closed by peer");
-
-                totalBytesRead += bytesRead;
+                message.Payload.CopyTo(buffer.AsSpan(5));
             }
 
-            return buffer;
+            await _stream.WriteAsync(buffer, ct);
+            await _stream.FlushAsync(ct);
+
+            _logger.LogDebug($"Sent {message.MessageId} message ({buffer.Length} bytes)");
+        }
+
+
+        public async Task<PeerMessage> ReceiveMessageAsync(CancellationToken ct)
+        {
+            if (_stream == null)
+                throw new InvalidOperationException("Not connected");
+
+            while (true) 
+            {
+                var lengthBuffer = new byte[4];
+                int totalRead = 0;
+
+                while (totalRead < 4)
+                {
+                    int bytesRead = await _stream.ReadAsync(
+                        lengthBuffer.AsMemory(totalRead, 4 - totalRead),
+                        ct
+                    );
+
+                    if (bytesRead == 0)
+                        throw new InvalidOperationException("Connection closed by peer");
+
+                    totalRead += bytesRead;
+                }
+
+                int messageLength = BinaryPrimitives.ReadInt32BigEndian(lengthBuffer);
+
+                if (messageLength == 0)
+                {
+                    _logger.LogDebug("Received Keep-Alive");
+                    continue; 
+                }
+
+                if (messageLength > 1024 * 1024 * 16) 
+                {
+                    throw new InvalidOperationException($"Message too large: {messageLength} bytes");
+                }
+
+                var idBuffer = new byte[1];
+                if (await _stream.ReadAsync(idBuffer, ct) == 0)
+                    throw new InvalidOperationException("Connection closed while reading message ID");
+
+                var messageId = (PeerMessageId)idBuffer[0];
+
+                int payloadLength = messageLength - 1;
+                var payload = new byte[payloadLength];
+
+                if (payloadLength > 0)
+                {
+                    totalRead = 0;
+                    while (totalRead < payloadLength)
+                    {
+                        int bytesRead = await _stream.ReadAsync(
+                            payload.AsMemory(totalRead, payloadLength - totalRead),
+                            ct
+                        );
+
+                        if (bytesRead == 0)
+                            throw new InvalidOperationException("Connection closed while reading payload");
+
+                        totalRead += bytesRead;
+                    }
+                }
+
+                _logger.LogDebug($"Received {messageId} message ({payloadLength} bytes payload)");
+
+                return new PeerMessage(messageId, payload);
+            }
+        }
+
+        public async Task SendRequestAsync(int pieceIndex, int begin, int length, CancellationToken ct)
+        {
+            var payload = new byte[12];
+
+            BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(0, 4), pieceIndex);
+            BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(4, 4), begin);
+            BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(8, 4), length);
+
+            var message = new PeerMessage(PeerMessageId.Request, payload);
+            await SendMessageAsync(message, ct);
+
+            _logger.LogDebug($"Sent Request: piece={pieceIndex}, offset={begin}, length={length}");
         }
     }
 }
