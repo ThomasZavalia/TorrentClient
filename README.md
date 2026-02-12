@@ -1,6 +1,6 @@
-# 🌊 TorrentClient.NET
+#  TorrentClient.NET
 
-![.NET](https://img.shields.io/badge/.NET-8.0-512BD4?style=flat&logo=dotnet)
+![.NET](https://img.shields.io/badge/.NET-10.0-512BD4?style=flat&logo=dotnet)
 ![React](https://img.shields.io/badge/React-18-61DAFB?style=flat&logo=react)
 ![Architecture](https://img.shields.io/badge/Architecture-Clean%20%2B%20Hexagonal-success)
 ![License](https://img.shields.io/badge/License-MIT-blue)
