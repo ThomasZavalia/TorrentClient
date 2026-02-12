@@ -18,106 +18,127 @@ namespace TorrentClient.Application.Managers
         private readonly ILogger _logger;
         private readonly DownloadPieceUseCase _downloadUseCase;
         private readonly IPeerConnectionFactory _connectionFactory; 
-        private readonly IPieceStore _pieceStore; 
+        private IPieceStore _pieceStore;
+        private readonly IPieceStoreFactory _pieceStoreFactory;
+        
 
         private ConcurrentQueue<int> _pieceQueue;
         private TorrentInfo? _torrent;
         private PeerId? _myPeerId;
         private int _completedPieces;
         public event EventHandler<ProgressEventArgs>? ProgressChanged;
+       
         public TorrentManager(
             ITorrentParser parser,
             IPeerDiscovery peerDiscovery,
             ILogger logger,
             DownloadPieceUseCase downloadUseCase,
             IPeerConnectionFactory connectionFactory,
-            IPieceStore pieceStore)
+            IPieceStoreFactory pieceStoreFactory, 
+           IProgressNotifier? progressNotifier = null)
         {
             _parser = parser;
             _peerDiscovery = peerDiscovery;
             _logger = logger;
             _downloadUseCase = downloadUseCase;
-            _connectionFactory = connectionFactory;
-            _pieceStore = pieceStore; 
+            _connectionFactory = connectionFactory; 
             _pieceQueue = new ConcurrentQueue<int>();
             _completedPieces = 0;
+            _pieceStoreFactory = pieceStoreFactory;
+           
         }
 
-        public async Task StartAsync(string torrentPath, CancellationToken ct)
+        public async Task StartAsync(string torrentPath, string outputDirectory, CancellationToken ct, IProgress<DownloadProgress>? progressReporter = null)
         {
             _logger.LogInfo($"Initializing download: {torrentPath}");
 
-           
             _torrent = _parser.Parse(torrentPath);
             _myPeerId = PeerId.GenerateNew();
 
             _logger.LogInfo($"Torrent: {_torrent.Name}");
             _logger.LogInfo($"Size: {FormatBytes(_torrent.Length)}");
             _logger.LogInfo($"Pieces: {_torrent.PieceCount}");
-
-
-            var random = new Random();
-            var pieces = Enumerable.Range(0, _torrent.PieceCount)
-                .OrderBy(_ => random.Next()) 
-                .ToList();
-
-            foreach (var piece in pieces)
+            progressReporter?.Report(new DownloadProgress
             {
-                _pieceQueue.Enqueue(piece);
-            }
-            _logger.LogInfo("Queue populated with random order.");
+                TorrentName = _torrent.Name,
+                TotalSize = _torrent.Length,
+                CompletedPieces = 0,
+                TotalPieces = _torrent.PieceCount,
+                Percentage = 0
+            });
 
-            var peers = await _peerDiscovery.DiscoverPeersAsync(
-                _torrent.InfoHash,
-                _torrent.AnnounceUrl,
-                _myPeerId,
-                _torrent.Length
+            string outputPath = Path.Combine(outputDirectory, _torrent.Name);
+            _pieceStore = _pieceStoreFactory.Create(
+                outputPath,
+                _torrent.Length,
+                _torrent.PieceLength
             );
 
-            var peerList = peers.ToList();
-            _logger.LogInfo($"Discovered {peerList.Count} peers");
-
-            if (peerList.Count == 0)
+            try
             {
-                _logger.LogError("No peers available");
-                return;
-            }
-
-            int maxConcurrency = Math.Min(peerList.Count, 5);
-            _logger.LogInfo($"Starting {maxConcurrency} parallel workers");
-
-            using var semaphore = new SemaphoreSlim(maxConcurrency);
-            var tasks = new List<Task>();
-
-            foreach (var peer in peerList)
-            {
-                if (_pieceQueue.IsEmpty) break;
-
-                await semaphore.WaitAsync(ct);
-
-                tasks.Add(Task.Run(async () =>
+                for (int i = 0; i < _torrent.PieceCount; i++)
                 {
-                    try
+                    _pieceQueue.Enqueue(i);
+                }
+
+                var peers = await _peerDiscovery.DiscoverPeersAsync(
+                    _torrent.InfoHash,
+                    _torrent.AnnounceUrl,
+                    _myPeerId,
+                    _torrent.Length
+                );
+
+                var peerList = peers.ToList();
+                _logger.LogInfo($"Discovered {peerList.Count} peers");
+
+                if (peerList.Count == 0)
+                {
+                    _logger.LogError("No peers available");
+                    return;
+                }
+
+                int maxConcurrency = Math.Min(peerList.Count, 5);
+                _logger.LogInfo($"Starting {maxConcurrency} parallel workers");
+
+                using var semaphore = new SemaphoreSlim(maxConcurrency);
+                var tasks = new List<Task>();
+
+                foreach (var peer in peerList)
+                {
+                    if (_pieceQueue.IsEmpty) break;
+
+                    await semaphore.WaitAsync(ct);
+
+                    tasks.Add(Task.Run(async () =>
                     {
-                        await ProcessPeerAsync(peer, ct);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogDebug($"Worker for {peer} failed: {ex.Message}");
-                    }
-                    finally
-                    {
-                        semaphore.Release();
-                    }
-                }, ct));
+                        try
+                        {
+                            await ProcessPeerAsync(peer, ct, progressReporter);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug($"Worker for {peer} failed: {ex.Message}");
+                        }
+                        finally
+                        {
+                            semaphore.Release();
+                        }
+                    }, ct));
+                }
+
+                await Task.WhenAll(tasks);
+
+                _logger.LogInfo($"Download complete! {_completedPieces}/{_torrent.PieceCount} pieces");
             }
-
-            await Task.WhenAll(tasks);
-
-            _logger.LogInfo($"Download complete! {_completedPieces}/{_torrent.PieceCount} pieces");
+            finally
+            {
+            
+                _pieceStore?.Dispose();
+            }
         }
 
-        private async Task ProcessPeerAsync(Peer peer, CancellationToken ct)
+
+        private async Task ProcessPeerAsync(Peer peer, CancellationToken ct, IProgress<DownloadProgress>? progressReporter)
         {
             using var connection = _connectionFactory.Create();
 
@@ -187,15 +208,28 @@ namespace TorrentClient.Application.Managers
                         _logger.LogInfo($"[{peer}] Downloading piece {pieceIndex}...");
 
                         var data = await _downloadUseCase.ExecuteAsync(connection, _torrent, pieceIndex, ct);
-                        await _pieceStore.SavePieceAsync(pieceIndex, data, ct);
+                        await _pieceStore!.SavePieceAsync(pieceIndex, data, ct);
 
                         Interlocked.Increment(ref _completedPieces);
-                        ReportProgress(); 
+
+                        progressReporter?.Report(new DownloadProgress
+                        {
+                            TorrentName = _torrent.Name,
+                            TotalSize = _torrent.Length,
+                            CompletedPieces = _completedPieces,
+                            TotalPieces = _torrent.PieceCount,
+                            Percentage = (_completedPieces * 100.0) / _torrent.PieceCount
+                        });
                     }
                     catch (Exception ex)
                     {
-                      
+
+                        _logger.LogError($"[{peer}] Failed piece {pieceIndex}: {ex.Message}");
+
                         _pieceQueue.Enqueue(pieceIndex);
+
+                      
+                        await Task.Delay(1000, ct);
                     }
                 }            
                 _logger.LogDebug($"[{peer}] Worker finished");
@@ -210,17 +244,19 @@ namespace TorrentClient.Application.Managers
             }
         }
 
-        private void ReportProgress()
+      /*  private async Task ReportProgressAsync()
         {
-            if (_torrent == null) return;
-            var progress = new ProgressEventArgs
-            {
-                CompletedPieces = _completedPieces,
-                TotalPieces = _torrent.PieceCount,
-                Percentage = (_completedPieces * 100.0) / _torrent.PieceCount
-            };
-            ProgressChanged?.Invoke(this, progress);
-        }
+            if (_torrent == null || _progressNotifier == null) return;
+
+            double percentage = (_completedPieces * 100.0) / _torrent.PieceCount;
+
+            await _progressNotifier.ReportProgressAsync(
+                _completedPieces,
+                _torrent.PieceCount,
+                percentage
+            );
+        }*/
+
 
         private static string FormatBytes(long bytes)
         {
@@ -236,8 +272,15 @@ namespace TorrentClient.Application.Managers
 
             return $"{size:0.##} {sizes[order]}";
         }
+        public class DownloadProgress
+        {
+            public string TorrentName { get; init; } = string.Empty;
+            public long TotalSize { get; init; }
+            public int CompletedPieces { get; init; }
+            public int TotalPieces { get; init; }
+            public double Percentage { get; init; }
+        }
 
 
-       
     }
 }
