@@ -87,7 +87,7 @@ Implementa **Clean Architecture** con **Hexagonal Pattern** (Ports & Adapters). 
 - Async/await en toda la app
 
 **Stack:**
-- Backend: C# 12, .NET 8, ASP.NET Core
+- Backend: C# 12, .NET 10, ASP.NET Core
 - Frontend: React 18, Vite
 - Testing: xUnit, Moq
 
