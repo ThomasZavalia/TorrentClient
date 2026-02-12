@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>TorrentClient Web</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 900px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+
+        h1 {
+            color: #2196F3;
+            text-align: center;
+        }
+
+        .connection-status {
+            text-align: center;
+            padding: 10px;
+            margin-bottom: 20px;
+            border-radius: 5px;
+        }
+
+            .connection-status.connected {
+                background: #4CAF50;
+                color: white;
+            }
+
+            .connection-status.disconnected {
+                background: #f44336;
+                color: white;
+            }
+
+        .upload-area {
+            background: white;
+            border: 2px dashed #2196F3;
+            padding: 40px;
+            text-align: center;
+            margin-bottom: 30px;
+            border-radius: 10px;
+        }
+
+            .upload-area button {
+                background: #2196F3;
+                color: white;
+                border: none;
+                padding: 12px 30px;
+                font-size: 16px;
+                border-radius: 5px;
+                cursor: pointer;
+            }
+
+                .upload-area button:hover {
+                    background: #1976D2;
+                }
+
+        .download-item {
+            background: white;
+            padding: 20px;
+            margin: 15px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+            .download-item h3 {
+                margin: 0 0 10px 0;
+            }
+
+        .progress-bar {
+            width: 100%;
+            height: 35px;
+            background: #e0e0e0;
+            border-radius: 5px;
+            overflow: hidden;
+            margin: 15px 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4CAF50, #8BC34A);
+            transition: width 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+
+        .status {
+            display: inline-block;
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 13px;
+            font-weight: bold;
+        }
+
+            .status.downloading {
+                background: #2196F3;
+                color: white;
+            }
+
+            .status.completed {
+                background: #4CAF50;
+                color: white;
+            }
+
+            .status.failed {
+                background: #f44336;
+                color: white;
+            }
+
+            .status.queued {
+                background: #FF9800;
+                color: white;
+            }
+    </style>
+</head>
+<body>
+    <h1>aaaTorrentClient</h1>
+
+    <div id="connectionStatus" class="connection-status disconnected">
+        ⚫ Connecting to server...
+    </div>
+
+    <div class="upload-area">
+        <h2>Upload Torrent File</h2>
+        <input type="file" id="torrentFile" accept=".torrent">
+        <br>
+        <button onclick="uploadTorrent()">Start Download</button>
+    </div>
+
+    <h2>Active Downloads</h2>
+    <div id="downloads"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/7.0.0/signalr.min.js"></script>
+    <script>
+        const API_URL = window.location.origin;
+        const downloads = new Map(); 
+
+        const connection = new signalR.HubConnectionBuilder()
+            .withUrl(`${API_URL}/torrentHub`)
+            .withAutomaticReconnect()
+            .build();
+
+        connection.on("ReceiveProgress", (data) => {
+            console.log("Progress:", data);
+            updateDownloadUI(data);
+        });
+
+        connection.on("DownloadCompleted", (data) => {
+            console.log("Completed:", data);
+            showNotification(`Download completed: ${data.torrentName}`);
+        });
+
+        connection.on("DownloadFailed", (data) => {
+            console.log("Failed:", data);
+            showNotification(`Download failed: ${data.error}`, 'error');
+        });
+
+        connection.onreconnecting(() => {
+            updateConnectionStatus(false);
+        });
+
+        connection.onreconnected(() => {
+            updateConnectionStatus(true);
+            loadDownloads();
+        });
+
+        connection.start()
+            .then(() => {
+                console.log("SignalR connected");
+                updateConnectionStatus(true);
+                loadDownloads();
+            })
+            .catch(err => {
+                console.error("SignalR error:", err);
+                updateConnectionStatus(false);
+            });
+
+        function updateConnectionStatus(connected) {
+            const status = document.getElementById('connectionStatus');
+            if (connected) {
+                status.className = 'connection-status connected';
+                status.textContent = 'Connected to server';
+            } else {
+                status.className = 'connection-status disconnected';
+                status.textContent = 'Disconnected from server';
+            }
+        }
+
+        async function uploadTorrent() {
+            const fileInput = document.getElementById('torrentFile');
+            const file = fileInput.files[0];
+
+            if (!file) {
+                alert('Please select a .torrent file');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch(`${API_URL}/api/torrents`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                showNotification(` Download queued: ${result.downloadId}`);
+                fileInput.value = '';
+
+                setTimeout(loadDownloads, 500);
+            } catch (error) {
+                console.error("Upload error:", error);
+                showNotification(' Upload failed', 'error');
+            }
+        }
+
+        async function loadDownloads() {
+            try {
+                const response = await fetch(`${API_URL}/api/torrents`);
+                const data = await response.json();
+
+                
+                data.forEach(d => downloads.set(d.id, d));
+
+                renderDownloads();
+            } catch (error) {
+                console.error("Load error:", error);
+            }
+        }
+
+        function updateDownloadUI(data) {
+            
+            const existing = downloads.get(data.downloadId) || {};
+            downloads.set(data.downloadId, {
+                ...existing,
+                id: data.downloadId,
+                torrentName: data.torrentName,
+                totalSize: data.totalSize,
+                completedPieces: data.completed,
+                totalPieces: data.total,
+                percentage: data.percentage,
+                state: data.state
+            });
+
+            renderDownloads();
+        }
+
+        function renderDownloads() {
+            const container = document.getElementById('downloads');
+
+            if (downloads.size === 0) {
+                container.innerHTML = '<p style="text-align: center; color: #999;">No downloads yet</p>';
+                return;
+            }
+
+            container.innerHTML = Array.from(downloads.values()).map(d => `
+                    <div class="download-item" id="download-${d.id}">
+                        <h3>${d.torrentName || 'Loading...'}</h3>
+                        <span class="status ${(d.state || 'queued').toLowerCase()}">${d.state || 'QUEUED'}</span>
+
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: ${d.percentage || 0}%">
+                                ${(d.percentage || 0).toFixed(1)}%
+                            </div>
+                        </div>
+
+                        <div class="info">
+                             ${d.completedPieces || 0} / ${d.totalPieces || 0} pieces
+                            ${d.totalSize > 0 ? `<br> ${formatBytes(d.totalSize)}` : ''}
+                        </div>
+
+                        ${d.error ? `<div style="color: red; margin-top: 10px;"> ${d.error}</div>` : ''}
+                    </div>
+                `).join('');
+        }
+
+        function showNotification(message, type = 'success') {
+           
+            console.log(message);
+        }
+
+        function formatBytes(bytes) {
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            if (bytes === 0) return '0 B';
+            const i = Math.floor(Math.log(bytes) / Math.log(1024));
+            return (bytes / Math.pow(1024, i)).toFixed(2) + ' ' + sizes[i];
+        }
+    </script>
+</body>
+</html>

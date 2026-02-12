@@ -3,6 +3,7 @@
     <Project Path="src/TorrentClient.Application/TorrentClient.Application.csproj" />
     <Project Path="src/TorrentClient.Domain/TorrentClient.Domain.csproj" />
     <Project Path="src/TorrentClient.Infrastructure/TorrentClient.Infrastructure.csproj" />
+    <Project Path="src/TorrentClient.Presentation.API/TorrentClient.Presentation.API.csproj" />
     <Project Path="src/TorrentClient.Presentation.CLI/TorrentClient.Presentation.CLI.csproj" />
   </Folder>
   <Folder Name="/tests/">

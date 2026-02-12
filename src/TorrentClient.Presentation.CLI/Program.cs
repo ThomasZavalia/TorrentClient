@@ -8,10 +8,10 @@ using TorrentClient.Infrastructure.Factories;
 ILogger logger = new ConsoleLoggerAdapter();
 ITorrentParser parser = new TorrentParserAdapter();
 IPeerDiscovery peerDiscovery = new HttpTrackerAdapter(logger);
-
 var downloadUseCase = new DownloadPieceUseCase(logger);
-
 IPeerConnectionFactory connectionFactory = new PeerConnectionFactory(logger);
+
+IPieceStoreFactory pieceStoreFactory = new PieceStoreFactory(logger);
 
 string torrentPath = args.Length > 0 ? args[0] : "debian.torrent";
 
@@ -21,20 +21,6 @@ if (!File.Exists(torrentPath))
     return;
 }
 
-logger.LogInfo("Parsing torrent...");
-var torrent = parser.Parse(torrentPath);
-
-string outputPath = Path.Combine(
-    Directory.GetCurrentDirectory(),
-    torrent.Name
-);
-
-IPieceStore pieceStore = new DiskPieceStore(
-    outputPath,
-    torrent.Length,
-    torrent.PieceLength,
-    logger
-);
 
 var manager = new TorrentManager(
     parser,
@@ -42,12 +28,13 @@ var manager = new TorrentManager(
     logger,
     downloadUseCase,
     connectionFactory,
-    pieceStore
+    pieceStoreFactory,
+    null 
 );
+
 
 manager.ProgressChanged += (sender, args) =>
 {
-   
     var originalColor = Console.ForegroundColor;
     Console.ForegroundColor = ConsoleColor.Cyan;
     Console.Write($"\rProgress: {args.CompletedPieces}/{args.TotalPieces} pieces ({args.Percentage:F2}%)   ");
@@ -68,20 +55,16 @@ try
     };
 
   
-    await manager.StartAsync(torrentPath, cts.Token);
+    string outputDirectory = Directory.GetCurrentDirectory();
+    await manager.StartAsync(torrentPath, outputDirectory, cts.Token,null);
 
-    logger.LogInfo("Download finished successfully!");
+    logger.LogInfo("\nDownload finished successfully!");
 }
 catch (OperationCanceledException)
 {
-    logger.LogWarning("Download cancelled by user");
+    logger.LogWarning("\nDownload cancelled by user");
 }
 catch (Exception ex)
 {
-    logger.LogError("Fatal error", ex);
-}
-finally
-{
-    
-    pieceStore.Dispose();
+    logger.LogError("\nFatal error", ex);
 }
