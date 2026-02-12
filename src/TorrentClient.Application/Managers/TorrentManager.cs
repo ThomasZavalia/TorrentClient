@@ -26,7 +26,7 @@ namespace TorrentClient.Application.Managers
         private TorrentInfo? _torrent;
         private PeerId? _myPeerId;
         private int _completedPieces;
-        public event EventHandler<ProgressEventArgs>? ProgressChanged;
+        
        
         public TorrentManager(
             ITorrentParser parser,
