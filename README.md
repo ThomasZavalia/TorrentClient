@@ -3,7 +3,7 @@
 ![.NET](https://img.shields.io/badge/.NET-10.0-512BD4?style=flat&logo=dotnet)
 ![React](https://img.shields.io/badge/React-18-61DAFB?style=flat&logo=react)
 ![Architecture](https://img.shields.io/badge/Architecture-Clean%20%2B%20Hexagonal-success)
-![License](https://img.shields.io/badge/License-MIT-blue)
+
 
 **TorrentClient.NET** es un cliente BitTorrent completo y funcional construido desde cero en **C# (.NET 8)** con una interfaz web moderna en **React**. Implementa el protocolo BitTorrent (BEP 3) con descarga concurrente, verificación de integridad SHA-1 y una arquitectura limpia y escalable.
 
